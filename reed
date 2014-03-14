@@ -1,0 +1,250 @@
+#!/usr/bin/python
+# python 2
+# hi i'm sfoster/cmang
+# Read text files in a speedy way.
+
+import argparse
+import curses
+import os.path
+import time
+
+class BookFileOps():    # file operations to load from different
+    """ Container for file operations like loading textfiles into TextBooks()
+    """
+    def __init__(self):
+        pass
+
+class TextBook():   # I don't know wtf to call this thing
+    """ The container for the words loaded from a file/pdf/whatever
+        and operations like loading 
+    """
+    # This should have methods like nextChunk and nextWord, other ways
+    # to get at the chunks. chunks look like: ['word1', 'word2', 'word3']
+    # Shouldn't load whole file into memory.. instead load maybe first 100
+    # words, 
+    # file load/save should be in separate classes that populate this thing?
+    def __init__(self):
+        self.wordList = []
+        self.currentWordNum = 0
+        self.wordListLen = 0     # store this so we don't have to call len(wordList) constantly.
+        self.currentChunk = ""  # What we are showing on the screen right now.
+        # fill with chunks.
+        self.nextBlank = False # next chunk is a blank.
+        self.lastWord = " "
+        self.delay = None    # how much we should add to the delay for the
+        # current word, in seconds. 0.7 because we want a delay on the first
+        # word read.
+        self.firstWord = True
+    def nextChunk(self, chunklen):
+        chunk = " "
+        if self.nextBlank is True:
+            self.currentChunk = chunk
+            self.nextBlank = False
+            self.delay = 0.7
+            return chunk
+        for x in range(0, chunklen):
+            word = self.nextWord()
+            if word:    # if there is a next word
+                chunk += "%s " % word
+                self.delay = None
+                if self.firstWord:
+                    self.delay = 0.7
+                    self.firstWord = False
+                if word.endswith('.') or word.endswith('?'): # if at end of sentence
+                    self.nextBlank = True
+                    self.lastWord = word
+                    self.delay = 0.5
+                    break   # stop adding to chunk
+                elif word.endswith(';') or word.endswith(','):
+                    self.lastWord = word
+                    self.delay = 0.5
+                    break
+            else:
+                return False
+        self.currentChunk = chunk
+        self.lastWord = word
+        return chunk
+    def prevChunk(self):
+        pass
+    def nextWord(self):
+        if self.currentWordNum < self.wordListLen:
+            word = self.wordList[self.currentWordNum]
+            self.currentWordNum += 1
+            return word
+        else:
+            return None     # last word, time to exit
+
+class CursesUI():
+    """ abstract curses code into this, call methods from BookReader class """
+    def __init__(self):
+        self.stdscr = None
+        #curses.wrapper(start)
+    def getch(self):
+        return self.stdscr.getch()
+    def dontBlockGetch(self):
+        self.stdscr.nodelay(1) # do not wait for input when calling getch
+    def getmaxyx(self):
+        self.stdscr.getmaxyx(self)
+    def refresh(self):
+        self.stdscr.move(0,0) # get cursor out of the way
+        self.stdscr.refresh()
+    def drawChunk(self, chunk):
+        # draw chunk string in the middle of the screen.
+        lines, columns = self.stdscr.getmaxyx()
+        chunkCol = (int(columns) / 2) - (len(chunk) / 2)  # "center" algorithm
+        chunkLine = (int(lines) / 2)
+        # clear line
+        self.stdscr.move(chunkLine, 0)
+        self.stdscr.clrtoeol()
+        # write string
+        self.stdscr.addstr(chunkLine, chunkCol, chunk)
+    def waitForKey(self):
+        self.stdscr.nodelay(0)  # wait for input on getch
+        return self.stdscr.getch()
+        self.stdscr.nodelay(1)  # don't wait for input on getch
+
+class BookReader():
+    """ contains main animation loop, makes sure escape codes dispalyed,
+        interacts with textBook class """ 
+    def __init__(self):
+        self.book = TextBook()   # to be populated with a loadFromFile
+        self.playing = False
+        self.appState = None
+        pass
+    def initUI(self):
+        self.ui = CursesUI()
+    def startReading(self, wordNum):
+        """ Start the animation at word # (int) """
+        self.book.currentWordNum = wordNum
+        self.playing = True
+        self.ui.dontBlockGetch()
+        sleep_time = (1000.0 / (self.appState.wpm / 60.0)) / 1000.0
+        #sleep_time = (1000.0 / 1) / 1000.0  # 1 wps test
+        new_time = time.time()
+        last_time = time.time()
+        while (self.playing):
+            c = self.ui.getch()
+            if c is -1:   # -1 means no keys are pressed.
+                #self.ui.drawChunk("Test - no keys pressed.")
+                #self.ui.refresh()
+                # so, check and see if we should update the
+                # screen
+                new_time = time.time()
+                realDelayTime = sleep_time
+                if (new_time >= (last_time + realDelayTime)):
+                    last_time = new_time
+                    # time to draw next chunk 
+                    if self.book.nextChunk(self.appState.chunkSize):
+                        self.ui.drawChunk(self.book.currentChunk)
+                        self.ui.refresh()
+                        if self.book.delay:
+                            time.sleep(self.book.delay)
+                    else:
+                        # Last word shown. Let's exit!
+                        time.sleep(0.2)
+                        self.playing = False
+                        #self.ui.drawChunk("Last word!")
+                        #self.ui.refresh()
+                    self.ui.refresh()
+                else:
+                    time.sleep(0.005) # to keep loop from sucking up cpu
+                pass
+            else:   # process input
+                if c in [113, 81]:   # q is quit
+                    self.playing = False
+                elif c in [13, curses.KEY_ENTER, 32]: # enter (13) or space (32) - pause
+                    self.ui.waitForKey()
+                    self.ui.dontBlockGetch()
+        #self.ui.drawChunk("And we're out.")
+        #self.ui.refresh()
+        
+    def oldStartReading(self, wordNum):
+        """ Start the animation at word # (int) """
+        #print self.book.wordList
+        escape = '\033['
+        # move cursor down 5 lines to make a "canvas"
+        for canvasLineNum in range(1, 5):
+            print ""
+        # make sure those lines are clear
+        for canvasLineNum in range(1,5):
+            print escape + '0K' + escape + '1A', # 0K clears line, [1A moves
+            # up one line
+        print escape + '1B'    # move cursor down 2 lines
+        # here we should make loop that checks time, prints next chunk, checks for input
+        # when not updating (use a non-blocking input)
+        nextWord = "test."
+        # non-ncurses getmaxyx() stty "cheat" from
+        # http://stackoverflow.com/questions/566746/how-to-get-console-window-width-in-python
+        rows, columns = os.popen('stty size', 'r').read().split()
+        nextCol = (int(columns) / 2) - (len(nextWord) / 2)  # "center" algorithm
+        print " " * nextCol,
+        print "test.",
+        print escape + '2B',    # move cursor down 2 lines
+    def notify(self, notifyText):
+        print notifyText
+    def exitError(self):
+        # if we were using ncurses etc, clean up terminal before exiting.
+        exit(1)
+    def exitNormal(self):
+        exit(0)
+    def loadFromFile(self, shortfilename): # short path filename
+        """ Load from file.txt into book """
+        filename = os.path.expanduser(shortfilename)
+        try:
+            f = open(filename, 'r')
+        except:
+            print "Could not open file."
+            return None     # fail condition
+        self.book.wordList = f.read().split()    # omg whole file
+        self.book.wordListLen = len(self.book.wordList)
+        return True
+
+class AppState():
+    def __init__(self):
+        # defaults
+        self.uiMode = 'vt100'
+        self.wpm = 300
+        self.chunkSize = 1
+        self.startWord = 0
+
+if (__name__ == "__main__"):
+    # Setup command-line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("filename", nargs=1, help="Text file to load")
+    parser.add_argument("-c", "--chunksize", help="Words per chunk (default 1)", nargs=1, type=int)
+    parser.add_argument("-w", "--wpm", help="Approximate words per minute (default 300)", nargs=1, type=int)
+    parser.add_argument("-s", "--startword", help="Word # to start at", nargs=1, type=int)
+    args = parser.parse_args()
+    if args.filename:
+        ui = BookReader()
+        filename = args.filename[0]
+        if not ui.loadFromFile(filename):
+            #ui.notify("Could not load file.")
+            ui.exitError()
+    appState = AppState()
+    if args.chunksize:
+        appState.chunkSize = args.chunksize[0] 
+    if args.wpm:
+        appState.wpm = args.wpm[0]
+    if args.startword:
+        appState.startWord = args.startword[0]
+    ui.appState = appState      # so UI knows about the runtime options
+    try:
+        stdscr = curses.initscr()
+        curses.noecho() ; curses.cbreak()
+        curses.curs_set(0)  # turn off cursor (if terminal supports)
+        #stdscr.keypad(1)
+        #ui.setScreen(stdscr)
+        ui.initUI()
+        ui.ui.stdscr = stdscr   # first ui is abstracted, second is "platform" (ncurses)
+        ui.startReading(ui.appState.startWord)
+    finally:
+        #stdscr.erase()
+        #stdscr.refresh()
+        #stdscr.keypad(0)
+        curses.curs_set(1)  # turn on cursor
+        curses.echo() ; curses.nocbreak()
+        curses.endwin()         # Terminate curses 
+        print "Last word %i: %s" % (ui.book.currentWordNum, ui.book.lastWord)
+        print "Total words in document: %i" % ui.book.wordListLen
+        print "Approximate wpm: %i" % ui.appState.wpm
